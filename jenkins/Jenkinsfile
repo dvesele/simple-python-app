@@ -1,22 +1,69 @@
 pipeline {
-    // Агент (agent) указывает, где будет выполняться pipeline.
-    // 'any' - означает запуск на любом доступном агенте.
     agent {
-        docker {image 'simple-python-test' }
+        docker {
+            image 'simple-python-test'
+            reuseNode true
+        }
+    }
+
+    options {
+        skipStagesAfterUnstable()
+    }
+
+    stages {
+        stage('Setup') {
+            steps {
+                sh '''
+                    python -m venv --system-site-packages venv
+                    . venv/bin/activate
+                    python --version
+                    pytest --version
+                '''
+            }
         }
 
-    // Блок stages содержит последовательность этапов выполнения.
-    stages {
-        // Stage 1 - первый этап pipeline
         stage('Build') {
-            // Блок steps содержит конкретные действия/команды
             steps {
-            // открываем виртуальное окружение для Python, это нужно чтобы был доступ сохранить зависимости из файла requirements.txt
                 sh '''
-                python -m venv venv
-                . venv/bin/activate 
-                pip install -r requirements.txt
+                    . venv/bin/activate
+                    python -m py_compile sources/add2vals.py sources/calc.py
                 '''
+
+                stash(
+                    name: 'compiled-results',
+                    includes: 'sources/**/*.py*'
+                )
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh '''
+                    . venv/bin/activate
+                    mkdir -p test-reports
+                    pytest --junit-xml=test-reports/results.xml sources/test_calc.py
+                '''
+            }
+
+            post {
+                always {
+                    junit(
+                        testResults: 'test-reports/results.xml',
+                        allowEmptyResults: true
+                    )
+                }
+            }
+        }
+
+        stage('Deliver') {
+            steps {
+                echo 'Собираю дистрибутив'
+            }
+
+            post {
+                success {
+                    archiveArtifacts artifacts: '**/*.py'
+                }
             }
         }
     }
